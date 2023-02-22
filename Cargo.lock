@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "FTCScoring"
+name = "ftc_powerplay_scoring"
 version = "0.1.0"
