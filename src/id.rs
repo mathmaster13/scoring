@@ -1,10 +1,18 @@
+use std::fmt::{Display, Formatter};
 use std::mem::transmute;
-use crate::Match;
+use std::num::NonZeroU8;
+use crate::{Junction, Match};
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Alliance {
     RED = 0, BLUE = 1
+}
+
+impl Display for Alliance {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", *self)
+    }
 }
 
 impl Alliance {
@@ -28,35 +36,45 @@ impl Alliance {
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub struct FtcTeamID(pub i32); // i64 because negative team numbers exist in test matches
 
-// FIXME if we seal the Match trait, this can be optimized into a single u8
-// FIXME where the first bit is the alliance and the others are the index
-// FIXME if this happens, alliance and index should be private
+// TODO do we optimize Option<MatchIndex> by making this nonzero and moving the index over by 1?
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub struct MatchIndex {
-    pub(crate) alliance: Alliance,
-    pub(crate) index: usize
+pub struct MatchIndex(u8);
+
+macro_rules! match_index {
+    ($index:expr, $alliance:expr) => {
+        MatchIndex(($index << 1) + $alliance as u8)
+    };
 }
 
 impl MatchIndex {
-    // infrastructure in case we seal Match
-    #[inline(always)]
-    pub fn new(alliance: Alliance, index: usize) -> MatchIndex {
-        MatchIndex {
-            alliance,
-            index
+    /// Creates a new MatchIndex, panicking if the index is not valid.
+    pub fn new<T: Junction, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> MatchIndex {
+        let len = robot_match[alliance].len();
+        if index as usize >= len {
+            panic!("Attempt to create a MatchIndex for index {}, but {} only has {} robot(s) in this match.", index, alliance, len)
+        }
+        match_index!(index, alliance)
+    }
+    /// Creates a new MatchIndex, returning None if the index is not valid.
+    pub fn try_new<T: Junction, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
+        let len = robot_match[alliance].len();
+        if index as usize >= len {
+            None
+        } else {
+            Some(match_index!(index, alliance))
         }
     }
-    #[inline(always)]
+    #[inline]
     pub fn alliance(self) -> Alliance {
-        self.alliance
+        unsafe { transmute(self.0 & 1) }
     }
-    #[inline(always)]
+    #[inline]
     pub fn index(self) -> usize {
-        self.index
+        (self.0 >> 1) as usize
     }
-    #[inline(always)]
+    #[inline]
     pub fn is_captain(self) -> bool {
-        self.index == 0
+        self.0 >> 1 == 0
     }
 }
 

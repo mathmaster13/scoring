@@ -1,10 +1,10 @@
 use crate::{Alliance, Auto, EndGame, FtcTeamID, Match, SignalZone, TeleOp};
-use crate::traditional::QualificationMatchAuto;
+use crate::traditional::TraditionalAuto;
 use crate::traditional::TraditionalJunction::{V1, W2, W3};
 
 #[test]
 fn test() {
-    let mut auto = QualificationMatchAuto::new(
+    let mut auto = TraditionalAuto::from_teams(
         [(FtcTeamID(4017), true), (FtcTeamID(16145), false)],
         [(FtcTeamID(8109), true), (FtcTeamID(8110), true)],
         SignalZone::Middle

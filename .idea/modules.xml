@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/FTCScoring.iml" filepath="$PROJECT_DIR$/FTCScoring.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ftc_powerplay_scoring.iml" filepath="$PROJECT_DIR$/ftc_powerplay_scoring.iml" />
     </modules>
   </component>
 </project>

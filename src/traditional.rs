@@ -6,6 +6,7 @@ use super::*;
 use crate::BeaconError::*;
 use crate::ConeRemovalError::{BeaconOnJunction, JunctionIsEmpty};
 use crate::MaybeInvalidJunction::{Invalid, Valid};
+use crate::sealed::Sealed;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
 #[repr(u8)]
@@ -19,46 +20,10 @@ pub enum TraditionalJunction {
     Z1 = 0b100_000_00, Z2 = 0b100_001_01, Z3 = 0b100_010_00, Z4 = 0b100_011_01, Z5 = 0b100_100_00
 }
 
-impl Junction for TraditionalJunction {
-    const ROWS: u8 = 5;
-    const COLUMNS: u8 = 5;
-    fn points(self) -> u8 {
-        (self as u8 & 0b11) + 2
-    }
-    fn row(self) -> u8 {
-        self as u8 >> 5
-    }
-    fn column(self) -> u8 {
-        (self as u8 >> 2) & 0b111
-    }
-}
-
-// possession is handled by the Match implementation
-#[derive(Debug)]
-struct InternalAllianceInfo<T: Junction, const N: usize> {
-    teams: [FtcTeamID; N],
-    penalty_points: u16,
-    auto_points: u16, // aka TBP1
-    terminal_amounts: (u8, u8),
-    beacon_placements: [MaybeInvalidJunction<T>; N],
-    parking_locations: [Option<ParkingLocation>; N]
-}
-
-impl <T: Junction, const N: usize> InternalAllianceInfo<T, N> {
-    fn new(teams: [FtcTeamID; N]) -> Self {
-        Self {
-            teams,
-            penalty_points: 0,
-            auto_points: 0,
-            terminal_amounts: (0, 0),
-            beacon_placements: [MaybeInvalidJunction::None; N],
-            parking_locations: [None; N]
-        }
-    }
-}
+junction_impl!(TraditionalJunction, 5, 5);
 
 #[derive(Debug)]
-struct InternalQualificationMatchAuto {
+struct InternalTraditionalMatch {
     red: InternalAllianceInfo<TraditionalJunction, 2>,
     blue: InternalAllianceInfo<TraditionalJunction, 2>,
     // beacons are not stored here!
@@ -73,7 +38,7 @@ macro_rules! has_beacon_on {
     };
 }
 
-impl InternalQualificationMatchAuto {
+impl InternalTraditionalMatch {
     fn data_of(&self, index: Alliance) -> &InternalAllianceInfo<TraditionalJunction, 2> {
         match index {
             Alliance::RED => &self.red,
@@ -118,34 +83,44 @@ impl InternalQualificationMatchAuto {
 }
 
 #[derive(Debug)]
-pub struct QualificationMatchAuto {
-    data: InternalQualificationMatchAuto,
+pub struct TraditionalAuto {
+    data: InternalTraditionalMatch,
     red_signal_sleeves: [bool; 2],
     blue_signal_sleeves: [bool; 2],
     signal_zone: SignalZone
 }
 
-impl QualificationMatchAuto {
-    pub fn new(red: [(FtcTeamID, bool); 2], blue: [(FtcTeamID, bool); 2], signal_zone: SignalZone) -> Self {
+impl TraditionalAuto {
+    /// Creates a new match with "dummy" teams with IDs of -1, -2, -3, and -4.
+    pub fn new(red_signal_sleeves: [bool; 2], blue_signal_sleeves: [bool; 2], signal_zone: SignalZone) -> Self {
+        Self {
+            data: InternalTraditionalMatch::new([FtcTeamID(-1), FtcTeamID(-2)], [FtcTeamID(-3), FtcTeamID(-4)], true),
+            red_signal_sleeves,
+            blue_signal_sleeves,
+            signal_zone
+        }
+    }
+    /// Creates a new match with the given teams, panicking if a team occurs more than once in this match.
+    pub fn from_teams(red: [(FtcTeamID, bool); 2], blue: [(FtcTeamID, bool); 2], signal_zone: SignalZone) -> Self {
         let [(red1, red1sleeve), (red2, red2sleeve)] = red;
         let [(blue1, blue1sleeve), (blue2, blue2sleeve)] = blue;
         Self {
-            data: InternalQualificationMatchAuto::new([red1, red2], [blue1, blue2], false),
+            data: InternalTraditionalMatch::new([red1, red2], [blue1, blue2], false),
             red_signal_sleeves: [red1sleeve, red2sleeve],
             blue_signal_sleeves: [blue1sleeve, blue2sleeve],
             signal_zone
         }
     }
-
-    pub fn try_new(red: [(FtcTeamID, bool); 2], blue: [(FtcTeamID, bool); 2], signal_zone: SignalZone) -> Option<Self> {
+    /// Creates a new match with the given teams, returning None if a team occurs more than once in this match.
+    pub fn try_from_teams(red: [(FtcTeamID, bool); 2], blue: [(FtcTeamID, bool); 2], signal_zone: SignalZone) -> Option<Self> {
         let [(red1, red1sleeve), (red2, red2sleeve)] = red;
         let [(blue1, blue1sleeve), (blue2, blue2sleeve)] = blue;
         let reds = [red1, red2];
         let blues = [blue1, blue2];
-        if InternalQualificationMatchAuto::verify_teams(reds, blues) {
+        if InternalTraditionalMatch::verify_teams(reds, blues) {
             Some(
                 Self {
-                    data: InternalQualificationMatchAuto::new(reds, blues, true),
+                    data: InternalTraditionalMatch::new(reds, blues, true),
                     red_signal_sleeves: [red1sleeve, red2sleeve],
                     blue_signal_sleeves: [blue1sleeve, blue2sleeve],
                     signal_zone
@@ -159,13 +134,13 @@ impl QualificationMatchAuto {
 
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct QualificationMatchTeleOp(InternalQualificationMatchAuto);
+pub struct TraditionalTeleOp(InternalTraditionalMatch);
 
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct QualificationMatchEndGame(InternalQualificationMatchAuto);
+pub struct TraditionalEndGame(InternalTraditionalMatch);
 
-impl Index<MatchIndex> for InternalQualificationMatchAuto {
+impl Index<MatchIndex> for InternalTraditionalMatch {
     type Output = FtcTeamID;
 
     fn index(&self, index: MatchIndex) -> &Self::Output {
@@ -173,22 +148,22 @@ impl Index<MatchIndex> for InternalQualificationMatchAuto {
     }
 }
 
-impl Index<Alliance> for InternalQualificationMatchAuto {
-    type Output = [FtcTeamID; 2];
+impl Index<Alliance> for InternalTraditionalMatch {
+    type Output = [FtcTeamID];
 
     fn index(&self, index: Alliance) -> &Self::Output {
         &self.data_of(index).teams
     }
 }
 
-impl Match<TraditionalJunction, 2> for InternalQualificationMatchAuto {
+impl Sealed for InternalTraditionalMatch {}
+
+impl Match<TraditionalJunction, 2, 2> for InternalTraditionalMatch {
     // returns true if modification was successful
     fn add_cone(&mut self, alliance: Alliance, location: TraditionalJunction) -> bool {
         if self.has_beacon_on(location) { return false; }
         match self.junctions.get_mut(&location) {
-            Some(cone_stack) => {
-                cone_stack.push(alliance);
-            },
+            Some(cone_stack) => cone_stack.push(alliance),
             None => {
                 self.junctions.insert(location, ConeStack::new(alliance));
             }
@@ -203,11 +178,11 @@ impl Match<TraditionalJunction, 2> for InternalQualificationMatchAuto {
                 if has_beacon_on!(self, location) {
                     Err(BeaconOnJunction)
                 } else {
-                    let (alliance, is_empty) = cone_stack.pop();
-                    if is_empty {
+                    let alliance = cone_stack.pop();
+                    if cone_stack.is_empty() {
                         self.junctions.remove(&location);
                     }
-                    Ok(alliance)
+                    Ok(alliance.expect("Empty cone stacks must be removed."))
                 }
             }
             None => Err(JunctionIsEmpty)
@@ -271,15 +246,16 @@ impl Match<TraditionalJunction, 2> for InternalQualificationMatchAuto {
     fn index_of(&self, robot: FtcTeamID) -> Option<MatchIndex> {
         self.alliance_of(robot).map(|alliance|
             MatchIndex::new(
+                self,
                 alliance,
-                self[alliance].iter().position(|t| *t == robot).unwrap()
+                self[alliance].iter().position(|t| *t == robot).unwrap() as u8
             )
         )
     }
 }
 
-impl Auto<TraditionalJunction, 2> for QualificationMatchAuto {
-    type TeleOpType = QualificationMatchTeleOp;
+impl Auto<TraditionalJunction, 2, 2> for TraditionalAuto {
+    type TeleOpType = TraditionalTeleOp;
 
     #[inline(always)]
     fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) -> bool {
@@ -316,7 +292,9 @@ impl Auto<TraditionalJunction, 2> for QualificationMatchAuto {
 }
 
 macro_rules! delegated_impl {
-    ($struc:ty, $delegate:tt, $beacon_impl:item $(, $result:literal)?) => {
+    ($struc:ty, $delegate:tt, $( $result:literal, )? ($( $beacon_impl:tt )+)) => {
+        impl Sealed for $struc {}
+
         impl Index<MatchIndex> for $struc {
             type Output = FtcTeamID;
 
@@ -327,7 +305,7 @@ macro_rules! delegated_impl {
         }
 
         impl Index<Alliance> for $struc {
-            type Output = [FtcTeamID; 2];
+            type Output = [FtcTeamID];
 
             #[inline(always)]
             fn index(&self, index: Alliance) -> &Self::Output {
@@ -335,7 +313,7 @@ macro_rules! delegated_impl {
             }
         }
 
-        impl Match<TraditionalJunction, 2> for $struc {
+        impl Match<TraditionalJunction, 2, 2> for $struc {
             #[inline(always)]
             fn add_cone(&mut self, alliance: Alliance, location: TraditionalJunction) -> bool {
                 self.$delegate.add_cone(alliance, location)
@@ -347,8 +325,7 @@ macro_rules! delegated_impl {
                 $( ; $result )?
             }
 
-            type BeaconErrorType = BeaconError;
-            $beacon_impl
+            $( $beacon_impl )+
 
             type ConeRemovalErrorType = ConeRemovalError;
             fn remove_cone(&mut self, location: TraditionalJunction) -> Result<Alliance, Self::ConeRemovalErrorType> {
@@ -375,24 +352,26 @@ macro_rules! delegated_impl {
 
 macro_rules! beacon {
     ($delegate:tt) => {
-        fn add_beacon(&mut self, robot: MatchIndex, _: TraditionalJunction) -> Result<(), BeaconError> {
+        type BeaconErrorType = BeaconScoredOutsideEndgame;
+        fn add_beacon(&mut self, robot: MatchIndex, _: TraditionalJunction) -> Result<(), Self::BeaconErrorType> {
             self.$delegate.data_of_mut(robot.alliance()).beacon_placements[robot.index()] = Invalid;
-            Err(ScoredOutsideEndgame)
+            Err(BeaconScoredOutsideEndgame)
         }
     };
 }
 
-delegated_impl!(QualificationMatchAuto, data, beacon! { data });
-delegated_impl!(QualificationMatchTeleOp, 0, beacon! { 0 }, true);
-delegated_impl!(QualificationMatchEndGame, 0,
+delegated_impl!(TraditionalAuto, data, ( beacon! { data } ));
+delegated_impl!(TraditionalTeleOp, 0, true, ( beacon! { 0 } ));
+delegated_impl!(TraditionalEndGame, 0, true, (
+    type BeaconErrorType = BeaconError;
     fn add_beacon(&mut self, robot: MatchIndex, location: TraditionalJunction) -> Result<(), BeaconError> {
         #![inline(always)]
         self.0.add_beacon(robot, location)
-    }, true
-);
+    }
+));
 
-impl TeleOp<TraditionalJunction, 2> for QualificationMatchTeleOp {
-    type EndGameType = QualificationMatchEndGame;
+impl TeleOp<TraditionalJunction, 2, 2> for TraditionalTeleOp {
+    type EndGameType = TraditionalEndGame;
 
     #[inline(always)]
     fn into_end_game(self) -> Self::EndGameType {
@@ -400,12 +379,7 @@ impl TeleOp<TraditionalJunction, 2> for QualificationMatchTeleOp {
     }
 }
 
-impl EndGame<TraditionalJunction, 2> for QualificationMatchEndGame {
-    fn park_in_terminal(&mut self, robot: MatchIndex) -> bool {
-        // exact terminal location does not matter
-        self.0.park(robot, ParkingLocation::NearTerminal)
-    }
-
+impl TraditionalEndGame {
     fn end_match(self) -> [AllianceInfo<2>; 2] {
         [Alliance::RED, Alliance::BLUE].map(|alliance| {
             let internal_info = self.0.data_of(alliance);
@@ -428,11 +402,24 @@ impl EndGame<TraditionalJunction, 2> for QualificationMatchEndGame {
                     }
                     points += self.0.junctions.iter()
                         .map(|(&junction, cone_stack)|
-                             (alliance == cone_stack.top_cone() && !beacons.contains(&Valid(junction))) as u16 * 3
+                            (alliance == cone_stack.top_cone().expect("Empty cone stacks should not exist") && !beacons.contains(&Valid(junction))) as u16 * 3
                         ).sum::<u16>();
                     points
                 },
             }
         })
+    }
+}
+
+impl EndGame<TraditionalJunction, 2, 2> for TraditionalEndGame {
+    fn park_in_terminal(&mut self, robot: MatchIndex) -> bool {
+        // exact terminal location does not matter
+        self.0.park(robot, ParkingLocation::NearTerminal)
+    }
+
+    #[inline]
+    fn end_match(self) -> (AllianceInfo<2>, AllianceInfo<2>) {
+        let [red, blue] = self.end_match();
+        (red, blue)
     }
 }
