@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::hint::unreachable_unchecked;
 use std::mem::transmute;
 use std::ops::{Index};
@@ -8,7 +9,7 @@ use crate::ConeRemovalError::{BeaconOnJunction, JunctionIsEmpty};
 use crate::MaybeInvalidJunction::{Invalid, Valid};
 use crate::sealed::Sealed;
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug)]
 #[repr(u8)]
 // REPRESENTATION: [letter][number][junction points - 2]
 // everything is zero-indexed
@@ -192,11 +193,12 @@ impl Match<TraditionalJunction, 2, 2> for InternalTraditionalMatch {
     fn add_terminal(&mut self, alliance: Alliance, terminal: Terminal) -> bool {
         let amounts = &mut self.data_of_mut(alliance).terminal_amounts;
         let near_terminal = terminal == Terminal::Near;
-        if near_terminal {
-            amounts.0 += 1;
-        } else {
-            amounts.1 += 1;
-        }
+        // if near_terminal {
+        //     amounts.0 += 1;
+        // } else {
+        //     amounts.1 += 1;
+        // }
+        amounts[near_terminal as usize] += 1;
         near_terminal
     }
 
@@ -271,7 +273,7 @@ impl Auto<TraditionalJunction, 2, 2> for TraditionalAuto {
         let signal_zone = self.signal_zone;
         for (mut alliance_info, signal_sleeves) in [(&mut self.data.red, self.red_signal_sleeves), (&mut self.data.blue, self.blue_signal_sleeves)] {
             alliance_info.auto_points += {
-                alliance_info.terminal_amounts.0 +
+                alliance_info.terminal_amounts[0] +
                     (0..2).map(|i|
                         match alliance_info.parking_locations[i] {
                             Some(loc) => {

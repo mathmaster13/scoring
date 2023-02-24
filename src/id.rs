@@ -1,7 +1,7 @@
+use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::transmute;
-use std::num::NonZeroU8;
-use crate::{Junction, Match};
+use crate::{FieldCoordinate, Match};
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -10,7 +10,7 @@ pub enum Alliance {
 }
 
 impl Display for Alliance {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", *self)
     }
 }
@@ -41,27 +41,31 @@ pub struct FtcTeamID(pub i32); // i64 because negative team numbers exist in tes
 pub struct MatchIndex(u8);
 
 macro_rules! match_index {
-    ($index:expr, $alliance:expr) => {
+    ($alliance:expr, $index:expr) => {
         MatchIndex(($index << 1) + $alliance as u8)
     };
 }
 
 impl MatchIndex {
+    // TODO do we expose these?
+    pub(crate) const RED_CAPTAIN: MatchIndex = match_index!(Alliance::RED, 0);
+    pub(crate) const BLUE_CAPTAIN: MatchIndex = match_index!(Alliance::BLUE, 0);
+
     /// Creates a new MatchIndex, panicking if the index is not valid.
-    pub fn new<T: Junction, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> MatchIndex {
+    pub fn new<T: FieldCoordinate, const R: usize, const B: usize>(robot_match: &impl Match<T, R, B>, alliance: Alliance, index: u8) -> MatchIndex {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             panic!("Attempt to create a MatchIndex for index {}, but {} only has {} robot(s) in this match.", index, alliance, len)
         }
-        match_index!(index, alliance)
+        match_index!(alliance, index)
     }
     /// Creates a new MatchIndex, returning None if the index is not valid.
-    pub fn try_new<T: Junction, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
+    pub fn try_new<T: FieldCoordinate, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             None
         } else {
-            Some(match_index!(index, alliance))
+            Some(match_index!(alliance, index))
         }
     }
     #[inline]
@@ -75,6 +79,15 @@ impl MatchIndex {
     #[inline]
     pub fn is_captain(self) -> bool {
         self.0 >> 1 == 0
+    }
+}
+
+impl Display for MatchIndex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MatchIndex")
+            .field("alliance", &self.alliance())
+            .field("index", &self.index())
+            .finish()
     }
 }
 

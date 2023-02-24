@@ -17,7 +17,8 @@ mod id;
 
 // allows for abstraction over any field type
 // (0, 0) is one coordinate of the field
-pub trait Junction: Ord + Copy + sealed::Sealed {
+// TODO decide public trait bounds on this type. Copy is sadly probably needed
+pub trait FieldCoordinate: Ord + Copy + nohash::IsEnabled + sealed::Sealed {
     const ROWS: u8;
     const COLUMNS: u8;
     fn points(self) -> u8;
@@ -33,8 +34,16 @@ pub trait Junction: Ord + Copy + sealed::Sealed {
 macro_rules! junction_impl {
     ($struc:ty, $rows:literal, $columns:literal) => {
         impl Sealed for $struc {}
+        impl nohash::IsEnabled for $struc {}
 
-        impl Junction for $struc {
+        // for safety with nohash
+        impl std::hash::Hash for $struc {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                state.write_u8(*self as u8);
+            }
+        }
+
+        impl FieldCoordinate for $struc {
             const ROWS: u8 = $rows;
             const COLUMNS: u8 = $columns;
             fn points(self) -> u8 {
@@ -55,7 +64,7 @@ mod sealed {
 }
 
 // TODO index bounds may or may not work with remote; slices instead of arrays may be needed
-pub trait Match<T: Junction, const R: usize, const B: usize>: sealed::Sealed + Index<Alliance, Output = [FtcTeamID]>
+pub trait Match<T: FieldCoordinate, const R: usize, const B: usize>: sealed::Sealed + Index<Alliance, Output = [FtcTeamID]>
 + Index<MatchIndex, Output = FtcTeamID> {
     fn add_cone(&mut self, alliance: Alliance, location: T) -> bool;
     type ConeRemovalErrorType;
@@ -69,16 +78,16 @@ pub trait Match<T: Junction, const R: usize, const B: usize>: sealed::Sealed + I
     }
     fn index_of(&self, robot: FtcTeamID) -> Option<MatchIndex>;
 }
-pub trait Auto<T: Junction, const R: usize, const B: usize>: Match<T, R, B> {
+pub trait Auto<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
     type TeleOpType: TeleOp<T, R, B>;
     fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) -> bool;
     fn into_teleop(self) -> Self::TeleOpType;
 }
-pub trait TeleOp<T: Junction, const R: usize, const B: usize>: Match<T, R, B> {
+pub trait TeleOp<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
     type EndGameType: EndGame<T, R, B>;
     fn into_end_game(self) -> Self::EndGameType;
 }
-pub trait EndGame<T: Junction, const R: usize, const B: usize>: Match<T, R, B> {
+pub trait EndGame<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
     fn park_in_terminal(&mut self, robot: MatchIndex) -> bool;
     fn end_match(self) -> (AllianceInfo<R>, AllianceInfo<B>);
 }
@@ -190,22 +199,22 @@ pub enum ConeRemovalError {
 
 // possession is handled by the Match implementation
 #[derive(Debug)]
-struct InternalAllianceInfo<T: Junction, const N: usize> {
+struct InternalAllianceInfo<T: FieldCoordinate, const N: usize> {
     teams: [FtcTeamID; N],
     penalty_points: u16,
     auto_points: u16, // aka TBP1
-    terminal_amounts: (u8, u8),
+    terminal_amounts: [u8; 2],
     beacon_placements: [MaybeInvalidJunction<T>; N],
     parking_locations: [Option<ParkingLocation>; N]
 }
 
-impl <T: Junction, const N: usize> InternalAllianceInfo<T, N> {
+impl <T: FieldCoordinate, const N: usize> InternalAllianceInfo<T, N> {
     fn new(teams: [FtcTeamID; N]) -> Self {
         Self {
             teams,
             penalty_points: 0,
             auto_points: 0,
-            terminal_amounts: (0, 0),
+            terminal_amounts: [0; 2],
             beacon_placements: [MaybeInvalidJunction::None; N],
             parking_locations: [None; N]
         }
@@ -223,7 +232,7 @@ pub struct AllianceInfo<const N: usize> {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
-enum MaybeInvalidJunction<T: Junction> {
+enum MaybeInvalidJunction<T: FieldCoordinate> {
     Valid(T), Invalid, None
 }
 
