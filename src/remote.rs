@@ -504,7 +504,9 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
                 // circuit logic
                 points += {
                     let circuit_pattern = CIRCUIT_PATTERNS[self.0.circuit_pattern as usize];
-                    if self.0.junctions.len() != circuit_pattern.len() {
+                    if self.0.junctions.len() != circuit_pattern.len()
+                        || self.0.data.terminal_amounts[0] == 0
+                        || self.0.data.terminal_amounts[1] == 0{
                         0
                     } else {
                         circuit_pattern.iter().all(|key| self.0.junctions.contains_key(key)) as u16 * 20
