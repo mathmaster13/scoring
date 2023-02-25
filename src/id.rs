@@ -48,11 +48,12 @@ macro_rules! match_index {
 
 impl MatchIndex {
     // TODO do we expose these?
+    // TODO unchecked new?
     pub(crate) const RED_CAPTAIN: MatchIndex = match_index!(Alliance::RED, 0);
     pub(crate) const BLUE_CAPTAIN: MatchIndex = match_index!(Alliance::BLUE, 0);
 
     /// Creates a new MatchIndex, panicking if the index is not valid.
-    pub fn new<T: FieldCoordinate, const R: usize, const B: usize>(robot_match: &impl Match<T, R, B>, alliance: Alliance, index: u8) -> MatchIndex {
+    pub fn new<T: FieldCoordinate>(robot_match: &impl Match<T>, alliance: Alliance, index: u8) -> MatchIndex {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             panic!("Attempt to create a MatchIndex for index {}, but {} only has {} robot(s) in this match.", index, alliance, len)
@@ -60,7 +61,7 @@ impl MatchIndex {
         match_index!(alliance, index)
     }
     /// Creates a new MatchIndex, returning None if the index is not valid.
-    pub fn try_new<T: FieldCoordinate, const R: usize, const B: usize>(robot_match: impl Match<T, R, B>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
+    pub fn try_new<T: FieldCoordinate>(robot_match: impl Match<T>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             None

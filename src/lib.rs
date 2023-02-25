@@ -64,8 +64,7 @@ mod sealed {
 }
 
 // TODO index bounds may or may not work with remote; slices instead of arrays may be needed
-pub trait Match<T: FieldCoordinate, const R: usize, const B: usize>: sealed::Sealed + Index<Alliance, Output = [FtcTeamID]>
-+ Index<MatchIndex, Output = FtcTeamID> {
+pub trait Match<T: FieldCoordinate>: sealed::Sealed + Index<Alliance, Output = [FtcTeamID]> + Index<MatchIndex, Output = FtcTeamID> {
     fn add_cone(&mut self, alliance: Alliance, location: T) -> bool;
     type ConeRemovalErrorType;
     fn remove_cone(&mut self, location: T) -> Result<Alliance, Self::ConeRemovalErrorType>;
@@ -78,17 +77,17 @@ pub trait Match<T: FieldCoordinate, const R: usize, const B: usize>: sealed::Sea
     }
     fn index_of(&self, robot: FtcTeamID) -> Option<MatchIndex>;
 }
-pub trait Auto<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
-    type TeleOpType: TeleOp<T, R, B>;
-    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) -> bool;
+pub trait Auto<T: FieldCoordinate, const R: usize, const B: usize>: Match<T> {
+    type TeleOpType: TeleOp<T, R, B>; // FIXME we can't make this extend From<Self> without making this no longer object safe
+    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>);
     fn into_teleop(self) -> Self::TeleOpType;
 }
-pub trait TeleOp<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
+pub trait TeleOp<T: FieldCoordinate, const R: usize, const B: usize>: Match<T> {
     type EndGameType: EndGame<T, R, B>;
     fn into_end_game(self) -> Self::EndGameType;
 }
-pub trait EndGame<T: FieldCoordinate, const R: usize, const B: usize>: Match<T, R, B> {
-    fn park_in_terminal(&mut self, robot: MatchIndex) -> bool;
+pub trait EndGame<T: FieldCoordinate, const R: usize, const B: usize>: Match<T> {
+    fn park_in_terminal(&mut self, robot: MatchIndex);
     fn end_match(self) -> (AllianceInfo<R>, AllianceInfo<B>);
 }
 
@@ -218,6 +217,27 @@ impl <T: FieldCoordinate, const N: usize> InternalAllianceInfo<T, N> {
             beacon_placements: [MaybeInvalidJunction::None; N],
             parking_locations: [None; N]
         }
+    }
+
+    /// Scores only the terminals and parking in auto.
+    /// (This is just shared logic between traditional and remote)
+    fn score_auto_parking_terminals(&mut self, signal_sleeves: [bool; N], signal_zone: SignalZone) {
+        self.auto_points += {
+            self.terminal_amounts[0] +
+                (0..2).map(|i|
+                    match self.parking_locations[i] {
+                        Some(loc) => {
+                            if loc == signal_zone.into() {
+                                (signal_sleeves[i] as u8 + 1) * 10
+                            } else {
+                                !loc.is_signal_zone() as u8 * 2
+                            }
+                        }
+                        None => 0
+                    }
+                ).sum::<u8>()
+        } as u16;
+        self.parking_locations = [None; N];
     }
 }
 

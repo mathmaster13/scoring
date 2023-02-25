@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::hash::Hasher;
+use nohash::IntMap;
 use std::hint::unreachable_unchecked;
 use std::mem::transmute;
 use std::ops::{Index};
@@ -28,7 +27,7 @@ struct InternalTraditionalMatch {
     red: InternalAllianceInfo<TraditionalJunction, 2>,
     blue: InternalAllianceInfo<TraditionalJunction, 2>,
     // beacons are not stored here!
-    junctions: HashMap<TraditionalJunction, ConeStack>
+    junctions: IntMap<TraditionalJunction, ConeStack>
 }
 
 // like has_beacon_on, but inlined to appease the borrow checker
@@ -63,7 +62,7 @@ impl InternalTraditionalMatch {
             Self {
                 red: InternalAllianceInfo::new(red),
                 blue: InternalAllianceInfo::new(blue),
-                junctions: HashMap::new()
+                junctions: IntMap::default()
             }
         } else {
             panic!("The same team cannot compete in two slots in the same match.")
@@ -77,9 +76,9 @@ impl InternalTraditionalMatch {
             && r2 != b1 && r2 != b2 && b1 != b2
     }
 
-    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) -> bool {
+    #[inline]
+    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
         self.data_of_mut(robot.alliance()).parking_locations[robot.index()] = Some(location.into());
-        true
     }
 }
 
@@ -159,7 +158,7 @@ impl Index<Alliance> for InternalTraditionalMatch {
 
 impl Sealed for InternalTraditionalMatch {}
 
-impl Match<TraditionalJunction, 2, 2> for InternalTraditionalMatch {
+impl Match<TraditionalJunction> for InternalTraditionalMatch {
     // returns true if modification was successful
     fn add_cone(&mut self, alliance: Alliance, location: TraditionalJunction) -> bool {
         if self.has_beacon_on(location) { return false; }
@@ -234,6 +233,7 @@ impl Match<TraditionalJunction, 2, 2> for InternalTraditionalMatch {
         output
     }
 
+    #[inline(always)]
     fn penalty(&mut self, alliance: Alliance, points: u8) {
         self.data_of_mut(alliance).penalty_points += points as u16;
     }
@@ -260,7 +260,7 @@ impl Auto<TraditionalJunction, 2, 2> for TraditionalAuto {
     type TeleOpType = TraditionalTeleOp;
 
     #[inline(always)]
-    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) -> bool {
+    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
         self.data.park(robot, location)
     }
 
@@ -270,30 +270,23 @@ impl Auto<TraditionalJunction, 2, 2> for TraditionalAuto {
             self.data.red.auto_points += (cone_stack.red_count * points) as u16;
             self.data.blue.auto_points += (cone_stack.blue_count * points) as u16;
         }
-        let signal_zone = self.signal_zone;
-        for (mut alliance_info, signal_sleeves) in [(&mut self.data.red, self.red_signal_sleeves), (&mut self.data.blue, self.blue_signal_sleeves)] {
-            alliance_info.auto_points += {
-                alliance_info.terminal_amounts[0] +
-                    (0..2).map(|i|
-                        match alliance_info.parking_locations[i] {
-                            Some(loc) => {
-                                if loc == signal_zone.into() {
-                                    (signal_sleeves[i] as u8 + 1) * 10
-                                } else {
-                                    !loc.is_signal_zone() as u8 * 2
-                                }
-                            }
-                            None => 0
-                        }
-                    ).sum::<u8>()
-            } as u16;
-            alliance_info.parking_locations = [None; 2];
+        for (alliance_info, signal_sleeves) in [(&mut self.data.red, self.red_signal_sleeves), (&mut self.data.blue, self.blue_signal_sleeves)] {
+            alliance_info.score_auto_parking_terminals(signal_sleeves, self.signal_zone);
         }
         unsafe { transmute(self.data) }
     }
 }
 
 macro_rules! delegated_impl {
+    ($struc:ty, $delegate:tt $( , $result:literal )?) => {
+        delegated_impl!($struc, $delegate, $( $result, )? (
+            type BeaconErrorType = BeaconScoredOutsideEndgame;
+            fn add_beacon(&mut self, robot: MatchIndex, _: TraditionalJunction) -> Result<(), Self::BeaconErrorType> {
+                self.$delegate.data_of_mut(robot.alliance()).beacon_placements[robot.index()] = Invalid;
+                Err(BeaconScoredOutsideEndgame)
+            }
+        ));
+    };
     ($struc:ty, $delegate:tt, $( $result:literal, )? ($( $beacon_impl:tt )+)) => {
         impl Sealed for $struc {}
 
@@ -315,7 +308,7 @@ macro_rules! delegated_impl {
             }
         }
 
-        impl Match<TraditionalJunction, 2, 2> for $struc {
+        impl Match<TraditionalJunction> for $struc {
             #[inline(always)]
             fn add_cone(&mut self, alliance: Alliance, location: TraditionalJunction) -> bool {
                 self.$delegate.add_cone(alliance, location)
@@ -352,22 +345,12 @@ macro_rules! delegated_impl {
     };
 }
 
-macro_rules! beacon {
-    ($delegate:tt) => {
-        type BeaconErrorType = BeaconScoredOutsideEndgame;
-        fn add_beacon(&mut self, robot: MatchIndex, _: TraditionalJunction) -> Result<(), Self::BeaconErrorType> {
-            self.$delegate.data_of_mut(robot.alliance()).beacon_placements[robot.index()] = Invalid;
-            Err(BeaconScoredOutsideEndgame)
-        }
-    };
-}
-
-delegated_impl!(TraditionalAuto, data, ( beacon! { data } ));
-delegated_impl!(TraditionalTeleOp, 0, true, ( beacon! { 0 } ));
+delegated_impl!(TraditionalAuto, data);
+delegated_impl!(TraditionalTeleOp, 0, true);
 delegated_impl!(TraditionalEndGame, 0, true, (
     type BeaconErrorType = BeaconError;
+    #[inline(always)]
     fn add_beacon(&mut self, robot: MatchIndex, location: TraditionalJunction) -> Result<(), BeaconError> {
-        #![inline(always)]
         self.0.add_beacon(robot, location)
     }
 ));
@@ -382,7 +365,7 @@ impl TeleOp<TraditionalJunction, 2, 2> for TraditionalTeleOp {
 }
 
 impl TraditionalEndGame {
-    fn end_match(self) -> [AllianceInfo<2>; 2] {
+    fn end_match(mut self) -> [AllianceInfo<2>; 2] {
         [Alliance::RED, Alliance::BLUE].map(|alliance| {
             let internal_info = self.0.data_of(alliance);
             AllianceInfo {
@@ -398,13 +381,14 @@ impl TraditionalEndGame {
                     let mut points = 0;
                     let beacons = internal_info.beacon_placements;
                     for beacon in beacons {
-                        if let Valid(_) = beacon {
+                        if let Valid(junction) = beacon {
+                            self.0.junctions.remove(&junction);
                             points += 10;
                         }
                     }
-                    points += self.0.junctions.iter()
-                        .map(|(&junction, cone_stack)|
-                            (alliance == cone_stack.top_cone().expect("Empty cone stacks should not exist") && !beacons.contains(&Valid(junction))) as u16 * 3
+                    points += self.0.junctions.values()
+                        .map(|cone_stack|
+                            (alliance == cone_stack.top_cone().expect("Empty cone stacks should not exist")) as u16 * 3
                         ).sum::<u16>();
                     points
                 },
@@ -414,7 +398,7 @@ impl TraditionalEndGame {
 }
 
 impl EndGame<TraditionalJunction, 2, 2> for TraditionalEndGame {
-    fn park_in_terminal(&mut self, robot: MatchIndex) -> bool {
+    fn park_in_terminal(&mut self, robot: MatchIndex) {
         // exact terminal location does not matter
         self.0.park(robot, ParkingLocation::NearTerminal)
     }
