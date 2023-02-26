@@ -34,7 +34,7 @@ impl Alliance {
 
 #[repr(transparent)]
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub struct FtcTeamID(pub i32); // i64 because negative team numbers exist in test matches
+pub struct FtcTeamID(pub i32); // i32 because negative team numbers exist in test matches
 
 // TODO do we optimize Option<MatchIndex> by making this nonzero and moving the index over by 1?
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
@@ -47,13 +47,17 @@ macro_rules! match_index {
 }
 
 impl MatchIndex {
-    // TODO do we expose these?
-    // TODO unchecked new?
-    pub(crate) const RED_CAPTAIN: MatchIndex = match_index!(Alliance::RED, 0);
-    pub(crate) const BLUE_CAPTAIN: MatchIndex = match_index!(Alliance::BLUE, 0);
+    pub const RED_CAPTAIN: MatchIndex = match_index!(Alliance::RED, 0);
+    pub const BLUE_CAPTAIN: MatchIndex = match_index!(Alliance::BLUE, 0);
 
+    #[inline(always)]
+    /// Creates a new MatchIndex.
+    pub fn new(alliance: Alliance, index: u8) -> Self {
+        match_index!(alliance, index)
+    }
+    
     /// Creates a new MatchIndex, panicking if the index is not valid.
-    pub fn new<T: FieldCoordinate>(robot_match: &impl Match<T>, alliance: Alliance, index: u8) -> MatchIndex {
+    pub fn for_match<T: FieldCoordinate>(robot_match: &impl Match<T>, alliance: Alliance, index: u8) -> Self {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             panic!("Attempt to create a MatchIndex for index {}, but {} only has {} robot(s) in this match.", index, alliance, len)
@@ -61,7 +65,7 @@ impl MatchIndex {
         match_index!(alliance, index)
     }
     /// Creates a new MatchIndex, returning None if the index is not valid.
-    pub fn try_new<T: FieldCoordinate>(robot_match: impl Match<T>, alliance: Alliance, index: u8) -> Option<MatchIndex> {
+    pub fn try_for_match<T: FieldCoordinate>(robot_match: impl Match<T>, alliance: Alliance, index: u8) -> Option<Self> {
         let len = robot_match[alliance].len();
         if index as usize >= len {
             None

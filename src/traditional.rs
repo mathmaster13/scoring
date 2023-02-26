@@ -247,7 +247,7 @@ impl Match<TraditionalJunction> for InternalTraditionalMatch {
 
     fn index_of(&self, robot: FtcTeamID) -> Option<MatchIndex> {
         self.alliance_of(robot).map(|alliance|
-            MatchIndex::new(
+            MatchIndex::for_match(
                 self,
                 alliance,
                 self[alliance].iter().position(|t| *t == robot).unwrap() as u8

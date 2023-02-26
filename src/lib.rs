@@ -63,7 +63,7 @@ mod sealed {
     pub trait Sealed {}
 }
 
-// TODO index bounds may or may not work with remote; slices instead of arrays may be needed
+// TODO beacon removal w/ match index of beacon that was removed
 pub trait Match<T: FieldCoordinate>: sealed::Sealed + Index<Alliance, Output = [FtcTeamID]> + Index<MatchIndex, Output = FtcTeamID> {
     fn add_cone(&mut self, alliance: Alliance, location: T) -> bool;
     type ConeRemovalErrorType;
@@ -133,9 +133,7 @@ impl ConeStack {
     fn pop(&mut self) -> Option<Alliance> {
         self.top_cone().map(|top| {
             self.decrement_count(top);
-            self.top_idx = unsafe {
-                NonZeroU8::new(as_u8(self.top_idx) - 1)
-            };
+            self.top_idx = NonZeroU8::new(as_u8(self.top_idx) - 1);
             top
         })
     }
