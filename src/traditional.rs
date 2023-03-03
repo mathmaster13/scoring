@@ -1,3 +1,6 @@
+//! Traditional match play.
+//!
+//! Traditional matches are played on a full-size field, with two players on each alliance.
 use super::*;
 use crate::sealed::Sealed;
 use crate::BeaconError::*;
@@ -13,31 +16,11 @@ use std::ops::Index;
 // REPRESENTATION: [letter][number][junction points - 2]
 // everything is zero-indexed
 pub enum TraditionalJunction {
-    V1 = 0b000_000_00,
-    V2 = 0b000_001_01,
-    V3 = 0b000_010_00,
-    V4 = 0b000_011_01,
-    V5 = 0b000_100_00,
-    W1 = 0b001_000_01,
-    W2 = 0b001_001_10,
-    W3 = 0b001_010_11,
-    W4 = 0b001_011_10,
-    W5 = 0b001_100_01,
-    X1 = 0b010_000_00,
-    X2 = 0b010_001_11,
-    X3 = 0b010_010_00,
-    X4 = 0b010_011_11,
-    X5 = 0b010_100_00,
-    Y1 = 0b011_000_01,
-    Y2 = 0b011_001_10,
-    Y3 = 0b011_010_11,
-    Y4 = 0b011_011_10,
-    Y5 = 0b011_100_01,
-    Z1 = 0b100_000_00,
-    Z2 = 0b100_001_01,
-    Z3 = 0b100_010_00,
-    Z4 = 0b100_011_01,
-    Z5 = 0b100_100_00,
+    V1 = 0b000_000_00, V2 = 0b000_001_01, V3 = 0b000_010_00, V4 = 0b000_011_01, V5 = 0b000_100_00,
+    W1 = 0b001_000_01, W2 = 0b001_001_10, W3 = 0b001_010_11, W4 = 0b001_011_10, W5 = 0b001_100_01,
+    X1 = 0b010_000_00, X2 = 0b010_001_11, X3 = 0b010_010_00, X4 = 0b010_011_11, X5 = 0b010_100_00,
+    Y1 = 0b011_000_01, Y2 = 0b011_001_10, Y3 = 0b011_010_11, Y4 = 0b011_011_10, Y5 = 0b011_100_01,
+    Z1 = 0b100_000_00, Z2 = 0b100_001_01, Z3 = 0b100_010_00, Z4 = 0b100_011_01, Z5 = 0b100_100_00,
 }
 
 junction_impl!(TraditionalJunction, 5, 5);
@@ -433,8 +416,33 @@ impl TeleOp<TraditionalJunction, 2, 2> for TraditionalTeleOp {
     }
 }
 
+macro_rules! copy_previous_calculations {
+    ($alliance:ident, $info:ident) => {
+        AllianceInfo {
+            alliance: Alliance::$alliance,
+            teams: $info.teams,
+            penalty_points: $info.penalty_points,
+            auto_points: $info.auto_points,
+            teleop_points: 0,
+            endgame_points: 0
+        }
+    };
+}
+
 impl TraditionalEndGame {
     fn end_match(mut self) -> [AllianceInfo<2>; 2] {
+        let red_info = self.0.red;
+        let blue_info = self.0.blue;
+        let mut red_out = copy_previous_calculations!(RED, red_info);
+        let mut blue_out = copy_previous_calculations!(BLUE, blue_info);
+        for (i, mut info) in [red_out, blue_out].iter_mut().enumerate() {
+            info.teleop_points = self.0.junctions.iter()
+                .map(|(junction, cone_stack)| {
+                    (cone_stack.count(unsafe { transmute(i as u8) }) * junction.points()) as u16
+                })
+                .sum();
+        }
+
         [Alliance::RED, Alliance::BLUE].map(|alliance| {
             let internal_info = self.0.data_of(alliance);
             AllianceInfo {
@@ -442,9 +450,7 @@ impl TraditionalEndGame {
                 teams: internal_info.teams,
                 penalty_points: internal_info.penalty_points,
                 auto_points: internal_info.auto_points,
-                teleop_points: self
-                    .0
-                    .junctions
+                teleop_points: self.0.junctions
                     .iter()
                     .map(|(junction, cone_stack)| {
                         (cone_stack.count(alliance) * junction.points()) as u16
@@ -452,21 +458,20 @@ impl TraditionalEndGame {
                     .sum(),
                 endgame_points: {
                     let mut points = 0;
+                    let mut possessions: Vec<TraditionalJunction> = vec![];
                     let beacons = internal_info.beacon_placements;
                     for beacon in beacons {
                         if let Valid(junction) = beacon {
                             self.0.junctions.remove(&junction);
+                            possessions.push(junction);
                             points += 10;
                         }
                     }
-                    points += self
-                        .0
-                        .junctions
+                    points += self.0.junctions
                         .values()
                         .map(|cone_stack| {
                             (alliance
-                                == cone_stack
-                                    .top_cone()
+                                == cone_stack.top_cone()
                                     .expect("Empty cone stacks should not exist"))
                                 as u16
                                 * 3

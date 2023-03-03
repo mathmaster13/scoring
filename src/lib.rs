@@ -14,8 +14,6 @@ mod locations;
 mod remote;
 mod traditional;
 
-// TODO IMPLEMENT DISPLAY FOR ALL APPLICABLE PUBLIC TYPES
-
 // allows for abstraction over any field type
 // (0, 0) is one coordinate of the field
 // TODO decide public trait bounds on this type. Copy is sadly probably needed

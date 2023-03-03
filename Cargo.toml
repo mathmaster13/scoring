@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 bitvec = "1.0.1"
 nohash = "0.2.0" # i'd do this myself to avoid dependencies but nahhh
+pathfinding = "4.2.1"

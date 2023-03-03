@@ -1,3 +1,8 @@
+//! The module for structures representing teams or alliances.
+//! [`FtcTeamID`] represents a team as they appear on a match leaderboard,
+//! while [`MatchIndex`] represents a team's role in a specific match.
+//! Prefer using [`MatchIndex`] if possible,
+//! since it does not require checking if a given ID is in the match.
 use crate::{FieldCoordinate, Match};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -6,7 +11,7 @@ use std::mem::transmute;
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Alliance {
-    RED = 0, BLUE = 1
+    RED = 0, BLUE = 1 // TODO rename to Red, Blue?
 }
 crate::display_impl_as_debug!(Alliance);
 
@@ -29,6 +34,7 @@ impl Alliance {
 
 #[repr(transparent)]
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
+// TODO rename to FtcTeamId?
 pub struct FtcTeamID(pub i32); // i32 because negative team numbers exist in test matches
 crate::display_impl_as_debug!(FtcTeamID);
 
