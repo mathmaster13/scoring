@@ -3,9 +3,9 @@ use crate::locations::{ParkingLocation, SignalZone, Terminal};
 use crate::sealed::Sealed;
 use crate::BeaconError::{BeaconPreviouslyScored, JunctionIsCapped};
 use crate::ConeRemovalError::{BeaconOnJunction, JunctionIsEmpty};
-use crate::MaybeInvalidJunction::{Invalid, Valid};
+use crate::MaybeInvalid::{Invalid, Valid};
 use crate::{AllianceInfo, InternalAllianceInfo};
-use crate::{Auto, BeaconError, ConeRemovalError, FieldCoordinate, Match, MaybeInvalidJunction};
+use crate::{Auto, BeaconError, ConeRemovalError, FieldCoordinate, Match, MaybeInvalid};
 use crate::{BeaconScoredOutsideEndgame, EndGame, TeleOp};
 use nohash::IntMap;
 use std::fmt::{Display, Formatter};
@@ -24,15 +24,15 @@ pub enum RemoteCircuitPattern {
     Pattern5,
     Pattern6,
 }
+crate::display_impl_as_debug!(RemoteCircuitPattern);
 
 // TODO this is very similar to a potential Robot API. hmm.
 pub trait RemoteMatch<T: FieldCoordinate>: Match<T> {
-    fn add_cone(&mut self, location: T) -> bool;
+    fn score(&mut self, location: T) -> bool;
     fn add_terminal(&mut self, terminal: Terminal) -> bool;
-    fn add_beacon(&mut self, location: T) -> Result<(), Self::BeaconErrorType>;
-    fn penalty(&mut self, points: u8);
+    fn cap(&mut self, location: T) -> Result<(), Self::BeaconErrorType>;
+    fn penalty(&mut self, points: u8); // TODO better name?
     fn team_id(&self) -> FtcTeamID;
-    // TODO do we have to copy Match methods to avoid needing UFCS
 }
 pub trait RemoteAuto<T: FieldCoordinate, const R: usize, const B: usize>
 where
@@ -46,7 +46,8 @@ where
         signal_zone: SignalZone,
         circuit_pattern: RemoteCircuitPattern,
     ) -> Self
-    where Self: Sized;
+    where
+        Self: Sized;
     #[inline(always)]
     /// Creates a remote match with the single participant having an ID of -1.
     fn new(
@@ -54,8 +55,15 @@ where
         signal_zone: SignalZone,
         circuit_pattern: RemoteCircuitPattern,
     ) -> Self
-    where Self: Sized {
-        Self::with_team(FtcTeamID(-1), has_signal_sleeve, signal_zone, circuit_pattern)
+    where
+        Self: Sized,
+    {
+        Self::with_team(
+            FtcTeamID(-1),
+            has_signal_sleeve,
+            signal_zone,
+            circuit_pattern,
+        )
     }
     fn park(&mut self, location: impl Into<ParkingLocation>);
 }
@@ -95,13 +103,6 @@ pub enum RedRemoteJunction {
 
 crate::junction_impl!(RedRemoteJunction, 3, 5);
 
-impl Display for RedRemoteJunction {
-    #[inline(always)]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        <Self as std::fmt::Debug>::fmt(self, f)
-    }
-}
-
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug)]
 #[repr(u8)]
 // REPRESENTATION: [letter][number][junction points - 2]
@@ -115,7 +116,8 @@ pub enum BlueRemoteJunction {
 
 crate::junction_impl!(BlueRemoteJunction, 3, 5);
 
-// TODO see if space-optimizing this is worth it
+// TODO nohash intmap, ahash intmap, or array?
+#[derive(Debug)]
 struct InternalRemoteMatch {
     data: InternalAllianceInfo<RedRemoteJunction, 1>,
     circuit_pattern: RemoteCircuitPattern,
@@ -130,15 +132,8 @@ impl InternalRemoteMatch {
             junctions: IntMap::default(),
         }
     }
-}
 
-impl InternalRemoteMatch {
-    #[inline]
-    fn has_beacon_on(&self, location: RedRemoteJunction) -> bool {
-        self.data.beacon_placements.contains(&Valid(location))
-    }
-
-    fn add_cone(&mut self, location: RedRemoteJunction) -> bool {
+    fn score(&mut self, location: RedRemoteJunction) -> bool {
         if self.data.beacon_placements[0] != Valid(location) {
             match self.junctions.get_mut(&location) {
                 Some(num) => match (*num).checked_add(1) {
@@ -158,7 +153,7 @@ impl InternalRemoteMatch {
         }
     }
 
-    fn remove_cone(
+    fn descore(
         &mut self,
         alliance: Alliance,
         location: RedRemoteJunction,
@@ -191,15 +186,15 @@ impl InternalRemoteMatch {
         near_terminal
     }
 
-    fn add_beacon(&mut self, location: RedRemoteJunction) -> Result<(), BeaconError> {
+    fn cap(&mut self, location: RedRemoteJunction) -> Result<(), BeaconError> {
         // Index verification is handled by the implementor. This has a hardcoded index of 0.
-        if self.has_beacon_on(location) {
-            Err(JunctionIsCapped)
-        } else if self.data.beacon_placements[0] != MaybeInvalidJunction::None {
-            Err(BeaconPreviouslyScored)
-        } else {
-            self.data.beacon_placements[0] = Valid(location);
-            Ok(())
+        match self.data.beacon_placements[0] {
+            Valid(loc) if loc == location => Err(JunctionIsCapped),
+            MaybeInvalid::None => {
+                self.data.beacon_placements[0] = Valid(location);
+                Ok(())
+            }
+            _ => Err(BeaconPreviouslyScored),
         }
     }
 
@@ -210,6 +205,7 @@ impl InternalRemoteMatch {
 }
 
 // TODO seeing if optimizing these two fields into one, along with the circuit pattern field, is worth it
+#[derive(Debug)]
 pub struct RedRemoteAuto {
     data: InternalRemoteMatch,
     has_signal_sleeve: bool,
@@ -217,8 +213,10 @@ pub struct RedRemoteAuto {
 }
 
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct RedRemoteTeleOp(InternalRemoteMatch);
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct RedRemoteEndGame(InternalRemoteMatch);
 
 macro_rules! check_red_captain {
@@ -284,34 +282,34 @@ macro_rules! delegated_impl {
 
         impl Match<$junction_type> for $struc {
             #[inline]
-            fn add_cone(&mut self, alliance: Alliance, location: $junction_type) -> bool {
+            fn score_for(&mut self, alliance: Alliance, location: $junction_type) -> bool {
                 $alliance_checker!(alliance);
-                <Self as RemoteMatch<$junction_type>>::add_cone(self, location)
+                self.score(location)
             }
 
             type ConeRemovalErrorType = ConeRemovalError;
             #[inline(always)]
-            fn remove_cone(&mut self, location: $junction_type) -> Result<Alliance, Self::ConeRemovalErrorType> {
-                self.$( $d2. )?$delegate.remove_cone(Alliance::$alliance, unsafe { transmute(location) })
+            fn descore(&mut self, location: $junction_type) -> Result<Alliance, Self::ConeRemovalErrorType> {
+                self.$( $d2. )?$delegate.descore(Alliance::$alliance, unsafe { transmute(location) })
             }
 
             #[inline]
-            fn add_terminal(&mut self, alliance: Alliance, terminal: Terminal) -> bool {
+            fn add_terminal_for(&mut self, alliance: Alliance, terminal: Terminal) -> bool {
                 $alliance_checker!(alliance);
-                <Self as RemoteMatch<$junction_type>>::add_terminal(self, terminal)
+                self.add_terminal(terminal)
             }
 
             type BeaconErrorType = $beacon_err_type;
             #[inline]
-            fn add_beacon(&mut self, robot: MatchIndex, location: $junction_type) -> Result<(), Self::BeaconErrorType> {
+            fn cap_for(&mut self, robot: MatchIndex, location: $junction_type) -> Result<(), Self::BeaconErrorType> {
                 $index_checker!(robot);
-                <Self as RemoteMatch<$junction_type>>::add_beacon(self, location)
+                self.cap(location)
             }
 
             #[inline]
-            fn penalty(&mut self, alliance: Alliance, points: u8) {
+            fn penalize(&mut self, alliance: Alliance, points: u8) {
                 $alliance_checker!(alliance);
-                <Self as RemoteMatch<$junction_type>>::penalty(self, points)
+                self.penalty(points)
             }
 
             fn alliance_of(&self, robot: FtcTeamID) -> Option<Alliance> {
@@ -333,8 +331,8 @@ macro_rules! delegated_impl {
 
         impl RemoteMatch<$junction_type> for $struc {
             #[inline(always)]
-            fn add_cone(&mut self, location: $junction_type) -> bool {
-                self.$( $d2. )?$delegate.add_cone(unsafe { transmute(location) })
+            fn score(&mut self, location: $junction_type) -> bool {
+                self.$( $d2. )?$delegate.score(unsafe { transmute(location) })
             }
 
             #[inline(always)]
@@ -363,7 +361,7 @@ macro_rules! red_delegated_impl {
     ($struc:ty, $delegate:tt $( , $result:literal )?) => {
         red_delegated_impl!($struc, $delegate, BeaconScoredOutsideEndgame, $( $result, )? (
             #[inline]
-            fn add_beacon(&mut self, _: RedRemoteJunction) -> Result<(), Self::BeaconErrorType> {
+            fn cap(&mut self, _: RedRemoteJunction) -> Result<(), Self::BeaconErrorType> {
                 self.$delegate.data.beacon_placements[0] = Invalid;
                 Err(BeaconScoredOutsideEndgame)
             }
@@ -390,8 +388,8 @@ red_delegated_impl!(RedRemoteAuto, data);
 red_delegated_impl!(RedRemoteTeleOp, 0);
 red_delegated_impl!(RedRemoteEndGame, 0, BeaconError, (
     #[inline(always)]
-    fn add_beacon(&mut self, location: RedRemoteJunction) -> Result<(), Self::BeaconErrorType> {
-        self.0.add_beacon(location)
+    fn cap(&mut self, location: RedRemoteJunction) -> Result<(), Self::BeaconErrorType> {
+        self.0.cap(location)
     }
 ));
 
@@ -399,7 +397,7 @@ impl Auto<RedRemoteJunction, 1, 0> for RedRemoteAuto {
     type TeleOpType = RedRemoteTeleOp;
 
     #[inline]
-    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
+    fn park_for(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
         check_red_captain!(robot);
         <Self as RemoteAuto<RedRemoteJunction, 1, 0>>::park(self, location)
     }
@@ -451,7 +449,7 @@ impl RemoteTeleOp<RedRemoteJunction, 1, 0> for RedRemoteTeleOp {}
 
 impl EndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
     #[inline]
-    fn park_in_terminal(&mut self, robot: MatchIndex) {
+    fn park_in_terminal_for(&mut self, robot: MatchIndex) {
         check_red_captain!(robot);
         <Self as RemoteEndGame<RedRemoteJunction, 1, 0>>::park_in_terminal(self)
     }
@@ -466,7 +464,7 @@ impl EndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
                 auto_points: 0,
                 teleop_points: 0,
                 endgame_points: 0,
-            }
+            },
         )
     }
 }
@@ -484,10 +482,12 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
             teams: self.0.data.teams,
             penalty_points: self.0.data.penalty_points,
             auto_points: self.0.data.auto_points,
-            teleop_points: self.0.junctions.iter()
-                .map(|(junction, count)| (
-                    count.get() * junction.points()) as u16
-                ).sum(),
+            teleop_points: self
+                .0
+                .junctions
+                .iter()
+                .map(|(junction, count)| (count.get() * junction.points()) as u16)
+                .sum(),
             endgame_points: {
                 let mut points = 0;
                 // beacons
@@ -496,7 +496,9 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
                 for beacon in beacons {
                     if let Valid(junction) = beacon {
                         // this inserts garbage that you should never read. we already calculated scored cones. TODO hmmmmm insertion
-                        self.0.junctions.insert(junction, unsafe { NonZeroU8::new_unchecked(255) });
+                        self.0
+                            .junctions
+                            .insert(junction, unsafe { NonZeroU8::new_unchecked(255) });
                         valid_beacon_count += 1;
                         points += 10;
                     }
@@ -506,10 +508,15 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
                     let circuit_pattern = CIRCUIT_PATTERNS[self.0.circuit_pattern as usize];
                     if self.0.junctions.len() != circuit_pattern.len()
                         || self.0.data.terminal_amounts[0] == 0
-                        || self.0.data.terminal_amounts[1] == 0 {
+                        || self.0.data.terminal_amounts[1] == 0
+                    {
                         0
                     } else {
-                        circuit_pattern.iter().all(|key| self.0.junctions.contains_key(key)) as u16 * 20
+                        circuit_pattern
+                            .iter()
+                            .all(|key| self.0.junctions.contains_key(key))
+                            as u16
+                            * 20
                     }
                 };
                 // possessions
@@ -521,23 +528,26 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
 }
 
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct BlueRemoteAuto {
-    inner: RedRemoteAuto
+    inner: RedRemoteAuto,
 }
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct BlueRemoteTeleOp {
-    inner: RedRemoteTeleOp
+    inner: RedRemoteTeleOp,
 }
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct BlueRemoteEndGame {
-    inner: RedRemoteEndGame
+    inner: RedRemoteEndGame,
 }
 
 macro_rules! blue_delegated_impl {
     ($struc:ty, $delegate:tt $( , $result:literal )?) => {
         blue_delegated_impl!($struc, $delegate, BeaconScoredOutsideEndgame, $( $result, )? (
             #[inline]
-            fn add_beacon(&mut self, _: BlueRemoteJunction) -> Result<(), Self::BeaconErrorType> {
+            fn cap(&mut self, _: BlueRemoteJunction) -> Result<(), Self::BeaconErrorType> {
                 self.inner.$delegate.data.beacon_placements[0] = Invalid;
                 Err(BeaconScoredOutsideEndgame)
             }
@@ -564,8 +574,8 @@ blue_delegated_impl!(BlueRemoteAuto, data);
 blue_delegated_impl!(BlueRemoteTeleOp, 0);
 blue_delegated_impl!(BlueRemoteEndGame, 0, BeaconError, (
     #[inline(always)]
-    fn add_beacon(&mut self, location: BlueRemoteJunction) -> Result<(), Self::BeaconErrorType> {
-        <RedRemoteEndGame as RemoteMatch<RedRemoteJunction>>::add_beacon(&mut self.inner, unsafe { transmute(location) })
+    fn cap(&mut self, location: BlueRemoteJunction) -> Result<(), Self::BeaconErrorType> {
+        self.inner.cap(unsafe { transmute(location) })
     }
 ));
 
@@ -573,7 +583,7 @@ impl Auto<BlueRemoteJunction, 0, 1> for BlueRemoteAuto {
     type TeleOpType = BlueRemoteTeleOp;
 
     #[inline]
-    fn park(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
+    fn park_for(&mut self, robot: MatchIndex, location: impl Into<ParkingLocation>) {
         check_blue_captain!(robot);
         <Self as RemoteAuto<BlueRemoteJunction, 0, 1>>::park(self, location)
     }
@@ -586,12 +596,26 @@ impl Auto<BlueRemoteJunction, 0, 1> for BlueRemoteAuto {
 
 impl RemoteAuto<BlueRemoteJunction, 0, 1> for BlueRemoteAuto {
     #[inline(always)]
-    fn with_team(team: FtcTeamID, has_signal_sleeve: bool, signal_zone: SignalZone, circuit_pattern: RemoteCircuitPattern) -> Self where Self: Sized {
+    fn with_team(
+        team: FtcTeamID,
+        has_signal_sleeve: bool,
+        signal_zone: SignalZone,
+        circuit_pattern: RemoteCircuitPattern,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         unsafe {
-            transmute(RedRemoteAuto::with_team(team, has_signal_sleeve, signal_zone, circuit_pattern))
+            transmute(RedRemoteAuto::with_team(
+                team,
+                has_signal_sleeve,
+                signal_zone,
+                circuit_pattern,
+            ))
         }
     }
 
+    #[inline(always)]
     fn park(&mut self, location: impl Into<ParkingLocation>) {
         <RedRemoteAuto as RemoteAuto<RedRemoteJunction, 1, 0>>::park(&mut self.inner, location)
     }
@@ -600,6 +624,7 @@ impl RemoteAuto<BlueRemoteJunction, 0, 1> for BlueRemoteAuto {
 impl TeleOp<BlueRemoteJunction, 0, 1> for BlueRemoteTeleOp {
     type EndGameType = BlueRemoteEndGame;
 
+    #[inline(always)]
     fn into_end_game(self) -> Self::EndGameType {
         unsafe { transmute(self) }
     }
@@ -609,7 +634,7 @@ impl RemoteTeleOp<BlueRemoteJunction, 0, 1> for BlueRemoteTeleOp {}
 
 impl EndGame<BlueRemoteJunction, 0, 1> for BlueRemoteEndGame {
     #[inline]
-    fn park_in_terminal(&mut self, robot: MatchIndex) {
+    fn park_in_terminal_for(&mut self, robot: MatchIndex) {
         check_blue_captain!(robot);
         <Self as RemoteEndGame<BlueRemoteJunction, 0, 1>>::park_in_terminal(self)
     }
@@ -624,7 +649,7 @@ impl EndGame<BlueRemoteJunction, 0, 1> for BlueRemoteEndGame {
                 teleop_points: 0,
                 endgame_points: 0,
             },
-            <Self as RemoteEndGame<BlueRemoteJunction, 0, 1>>::end_match(self)
+            <Self as RemoteEndGame<BlueRemoteJunction, 0, 1>>::end_match(self),
         )
     }
 }
@@ -632,11 +657,14 @@ impl EndGame<BlueRemoteJunction, 0, 1> for BlueRemoteEndGame {
 impl RemoteEndGame<BlueRemoteJunction, 0, 1> for BlueRemoteEndGame {
     #[inline(always)]
     fn park_in_terminal(&mut self) {
-        <RedRemoteEndGame as RemoteEndGame<RedRemoteJunction, 1, 0>>::park_in_terminal(&mut self.inner)
+        <RedRemoteEndGame as RemoteEndGame<RedRemoteJunction, 1, 0>>::park_in_terminal(
+            &mut self.inner,
+        )
     }
 
     fn end_match(self) -> AllianceInfo<1> {
-        let mut info = <RedRemoteEndGame as RemoteEndGame<RedRemoteJunction, 1, 0>>::end_match(self.inner);
+        let mut info =
+            <RedRemoteEndGame as RemoteEndGame<RedRemoteJunction, 1, 0>>::end_match(self.inner);
         info.alliance = Alliance::BLUE;
         info
     }

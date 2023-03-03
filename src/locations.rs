@@ -3,10 +3,14 @@ use std::mem::transmute;
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
 #[repr(u8)]
 pub enum ParkingLocation {
+    // signal zones
     LeftSignalZone = 0b0100_0000, MiddleSignalZone, RightSignalZone,
+    // terminals
     NearTerminal = 0b1000_0000, FarTerminal,
+    // other
     Substation = 0b0010_0000
 }
+crate::display_impl_as_debug!(ParkingLocation);
 
 impl ParkingLocation {
     #[inline(always)]
@@ -21,12 +25,14 @@ impl ParkingLocation {
 }
 
 impl From<Terminal> for ParkingLocation {
+    #[inline(always)]
     fn from(value: Terminal) -> Self {
         unsafe { transmute(value) }
     }
 }
 
 impl From<SignalZone> for ParkingLocation {
+    #[inline(always)]
     fn from(value: SignalZone) -> Self {
         unsafe { transmute(value) }
     }
@@ -37,6 +43,7 @@ impl From<SignalZone> for ParkingLocation {
 pub enum Terminal {
     Near = 0b1000_0000, Far
 }
+crate::display_impl_as_debug!(Terminal);
 
 impl TryFrom<ParkingLocation> for Terminal {
     type Error = ();
@@ -53,8 +60,11 @@ impl TryFrom<ParkingLocation> for Terminal {
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
 #[repr(u8)]
 pub enum SignalZone {
-    Left = 0b0100_0000, Middle, Right
+    Left = 0b0100_0000,
+    Middle,
+    Right,
 }
+crate::display_impl_as_debug!(SignalZone);
 
 impl TryFrom<ParkingLocation> for SignalZone {
     type Error = ();
