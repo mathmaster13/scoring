@@ -244,7 +244,7 @@ impl<T: FieldCoordinate, const N: usize> InternalAllianceInfo<T, N> {
     fn score_auto_parking_terminals(&mut self, signal_sleeves: [bool; N], signal_zone: SignalZone) {
         self.auto_points += {
             self.terminal_amounts[0]
-                + (0..2)
+                + (0..N)
                     .map(|i| match self.parking_locations[i] {
                         Some(loc) => {
                             if loc == signal_zone.into() {

@@ -10,6 +10,7 @@ use nohash::IntMap;
 use std::hint::unreachable_unchecked;
 use std::mem::transmute;
 use std::ops::Index;
+use crate::traditional::TraditionalJunctionOrStart::*;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug)]
 #[repr(u8)]
@@ -429,62 +430,177 @@ macro_rules! copy_previous_calculations {
     };
 }
 
+#[repr(u8)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
+enum TraditionalJunctionOrStart {
+    // copied from TraditionalJunction and must be synced with it
+    V1 = 0b000_000, V2 = 0b000_001, V3 = 0b000_010, V4 = 0b000_011, V5 = 0b000_100,
+    W1 = 0b001_000, W2 = 0b001_001, W3 = 0b001_010, W4 = 0b001_011, W5 = 0b001_100,
+    X1 = 0b010_000, X2 = 0b010_001, X3 = 0b010_010, X4 = 0b010_011, X5 = 0b010_100,
+    Y1 = 0b011_000, Y2 = 0b011_001, Y3 = 0b011_010, Y4 = 0b011_011, Y5 = 0b011_100,
+    Z1 = 0b100_000, Z2 = 0b100_001, Z3 = 0b100_010, Z4 = 0b100_011, Z5 = 0b100_100,
+
+    RedStart = 0b11_0000,
+    BlueStart = 0b11_0001
+}
+
+impl TraditionalJunctionOrStart {
+    fn red_success(&self) -> bool {
+        match self {
+            V5 | V4 | W5 => true,
+            _ => false
+        }
+    }
+    fn blue_success(&self) -> bool {
+        match self {
+            Z5 | Z4 | Y5 => true,
+            _ => false
+        }
+    }
+
+    fn coordinate(self) -> (u8, u8) {
+        (self as u8 >> 3, self as u8 & 0b111)
+    }
+    fn successors(self) -> Vec<TraditionalJunctionOrStart> {
+        match self {
+            RedStart => vec![Z1, Y1, Z2],
+            BlueStart => vec![V1, W1, V2],
+            // corner cases (literally)
+            V1 => vec![V2, W1, W2],
+            Z1 => vec![Y1, Y2, Z2],
+            V5 => vec![V4, W4, W5],
+            Z5 => vec![Y4, Y5, Z4],
+            _ => {
+                let (row, col) = self.coordinate();
+                // TODO make better.
+                unsafe {
+                    if row == 0 {
+                        vec![
+                            Self::from_coordinate((0, col - 1)),
+                            Self::from_coordinate((0, col + 1)),
+                            Self::from_coordinate((1, col - 1)),
+                            Self::from_coordinate((1, col)),
+                            Self::from_coordinate((1, col + 1))
+                        ]
+                    } else if row == 4 {
+                        vec![
+                            Self::from_coordinate((4, col - 1)),
+                            Self::from_coordinate((4, col + 1)),
+                            Self::from_coordinate((3, col - 1)),
+                            Self::from_coordinate((3, col)),
+                            Self::from_coordinate((3, col + 1))
+                        ]
+                    } else if col == 0 {
+                        vec![
+                            Self::from_coordinate((row - 1, 0)),
+                            Self::from_coordinate((row + 1, 0)),
+                            Self::from_coordinate((row - 1, 1)),
+                            Self::from_coordinate((row, 1)),
+                            Self::from_coordinate((row + 1, 1))
+                        ]
+                    } else if col == 4 {
+                        vec![
+                            Self::from_coordinate((row - 1, 4)),
+                            Self::from_coordinate((row + 1, 4)),
+                            Self::from_coordinate((row - 1, 3)),
+                            Self::from_coordinate((row, 3)),
+                            Self::from_coordinate((row + 1, 3))
+                        ]
+                    } else {
+                        vec![
+                            Self::from_coordinate((row - 1, col - 1)),
+                            Self::from_coordinate((row - 1, col)),
+                            Self::from_coordinate((row - 1, col + 1)),
+                            Self::from_coordinate((row, col - 1)),
+                            Self::from_coordinate((row, col + 1)),
+                            Self::from_coordinate((row + 1, col - 1)),
+                            Self::from_coordinate((row + 1, col)),
+                            Self::from_coordinate((row + 1, col + 1))
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    unsafe fn from_coordinate((row, col): (u8, u8)) -> TraditionalJunctionOrStart {
+        transmute((row << 3) + col)
+    }
+}
+
+impl Into<TraditionalJunctionOrStart> for TraditionalJunction {
+    #[inline(always)]
+    fn into(self) -> TraditionalJunctionOrStart {
+        unsafe { transmute(self as u8 >> 2) }
+    }
+}
+
 impl TraditionalEndGame {
+    const RED_SUCCESS: fn(&TraditionalJunctionOrStart) -> bool = TraditionalJunctionOrStart::red_success;
+    const BLUE_SUCCESS: fn(&TraditionalJunctionOrStart) -> bool = TraditionalJunctionOrStart::blue_success;
+
     fn end_match(mut self) -> [AllianceInfo<2>; 2] {
-        let red_info = self.0.red;
-        let blue_info = self.0.blue;
-        let mut red_out = copy_previous_calculations!(RED, red_info);
-        let mut blue_out = copy_previous_calculations!(BLUE, blue_info);
-        for (i, mut info) in [red_out, blue_out].iter_mut().enumerate() {
-            info.teleop_points = self.0.junctions.iter()
+        let red = self.0.red;
+        let blue = self.0.blue;
+        let mut out = [
+            copy_previous_calculations!(RED, red),
+            copy_previous_calculations!(BLUE, blue)
+        ];
+        let internal_info = [red, blue];
+        for i in 0..2 {
+            out[i].teleop_points = self.0.junctions.iter()
                 .map(|(junction, cone_stack)| {
                     (cone_stack.count(unsafe { transmute(i as u8) }) * junction.points()) as u16
                 })
-                .sum();
+                .sum::<u16>() + internal_info[i].terminal_amounts.iter().sum::<u8>() as u16;
         }
-
-        [Alliance::RED, Alliance::BLUE].map(|alliance| {
-            let internal_info = self.0.data_of(alliance);
-            AllianceInfo {
-                alliance,
-                teams: internal_info.teams,
-                penalty_points: internal_info.penalty_points,
-                auto_points: internal_info.auto_points,
-                teleop_points: self.0.junctions
-                    .iter()
-                    .map(|(junction, cone_stack)| {
-                        (cone_stack.count(alliance) * junction.points()) as u16
-                    })
-                    .sum(),
-                endgame_points: {
-                    let mut points = 0;
-                    let mut possessions: Vec<TraditionalJunction> = vec![];
-                    let beacons = internal_info.beacon_placements;
-                    for beacon in beacons {
-                        if let Valid(junction) = beacon {
-                            self.0.junctions.remove(&junction);
-                            possessions.push(junction);
-                            points += 10;
-                        }
+        for (i, start, success) in [(0, RedStart, Self::RED_SUCCESS), (1, BlueStart, Self::BLUE_SUCCESS)] {
+            let data = &internal_info[i];
+            out[i].endgame_points = {
+                // parking
+                let mut points = match data.parking_locations {
+                    [Some(ParkingLocation::NearTerminal), Some(ParkingLocation::NearTerminal)] => 4,
+                    [Some(ParkingLocation::NearTerminal), _] | [_, Some(ParkingLocation::NearTerminal)] => 2,
+                    _ => 0
+                };
+                let mut possessions: Vec<TraditionalJunctionOrStart> = vec![];
+                let beacons = data.beacon_placements;
+                for beacon in beacons {
+                    if let Valid(junction) = beacon {
+                        self.0.junctions.remove(&junction);
+                        possessions.push(junction.into());
+                        points += 10;
                     }
-                    points += self.0.junctions
-                        .values()
-                        .map(|cone_stack| {
-                            (alliance
-                                == cone_stack.top_cone()
-                                    .expect("Empty cone stacks should not exist"))
-                                as u16
-                                * 3
-                        })
-                        .sum::<u16>();
-                    points
-                },
-            }
-        })
+                }
+                points += self.0.junctions.iter_mut()
+                    .map(|(junction, cone_stack)| {
+                        if unsafe { transmute::<_, Alliance>(i as u8) }
+                            == cone_stack.top_cone().expect("Empty cone stacks should not exist.") {
+                            // self.0.junctions.remove(junction); // better efficiency MAYBE but borrowck is angy.
+                            possessions.push((*junction).into());
+                            3
+                        } else { 0 }
+                    })
+                    .sum::<u16>();
+                if data.terminal_amounts[0] == 0
+                    && data.terminal_amounts[1] == 0
+                    && pathfinding::prelude::bfs(
+                    &start,
+                    // TODO remove collect
+                    |&loc: &TraditionalJunctionOrStart| loc.successors().iter().copied()
+                        .filter(|l| possessions.contains(l)).collect::<Vec<_>>(),
+                    success
+                ).is_some() {
+                    points += 20;
+                }
+                points
+            };
+        }
+        out
     }
 }
 
 impl EndGame<TraditionalJunction, 2, 2> for TraditionalEndGame {
+    #[inline]
     fn park_in_terminal_for(&mut self, robot: MatchIndex) {
         // exact terminal location does not matter
         self.0.park(robot, ParkingLocation::NearTerminal)

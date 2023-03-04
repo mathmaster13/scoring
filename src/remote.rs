@@ -143,8 +143,7 @@ impl InternalRemoteMatch {
                     None => panic!("The cone stack at {location} has overflown."),
                 },
                 None => {
-                    self.junctions
-                        .insert(location, unsafe { NonZeroU8::new_unchecked(1) });
+                    self.junctions.insert(location, unsafe { NonZeroU8::new_unchecked(1) });
                 }
             }
             true
@@ -218,6 +217,14 @@ pub struct RedRemoteTeleOp(InternalRemoteMatch);
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct RedRemoteEndGame(InternalRemoteMatch);
+
+impl RedRemoteEndGame {
+    // copied to force the best default for end_match
+    #[inline(always)]
+    fn end_match(self) -> AllianceInfo<1> {
+        <Self as RemoteEndGame<_, 1, 0>>::end_match(self)
+    }
+}
 
 macro_rules! check_red_captain {
     ($index:expr) => {
@@ -403,14 +410,11 @@ impl Auto<RedRemoteJunction, 1, 0> for RedRemoteAuto {
     }
 
     fn into_teleop(mut self) -> Self::TeleOpType {
-        self.data.data.auto_points = self
-            .data
-            .junctions
+        self.data.data.auto_points = self.data.junctions
             .iter()
             .map(|(junction, &count)| (junction.points() * count.get()) as u16)
             .sum();
-        self.data
-            .data
+        self.data.data
             .score_auto_parking_terminals([self.has_signal_sleeve], self.signal_zone);
         unsafe { transmute(self.data) }
     }
@@ -422,12 +426,12 @@ impl RemoteAuto<RedRemoteJunction, 1, 0> for RedRemoteAuto {
         team: FtcTeamID,
         has_signal_sleeve: bool,
         signal_zone: SignalZone,
-        circuit_pattern: RemoteCircuitPattern,
+        circuit_pattern: RemoteCircuitPattern
     ) -> Self {
         Self {
             data: InternalRemoteMatch::new(team, circuit_pattern),
             has_signal_sleeve,
-            signal_zone,
+            signal_zone
         }
     }
 
@@ -473,7 +477,7 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
     #[inline]
     fn park_in_terminal(&mut self) {
         // exact terminal location does not matter
-        self.0.data.terminal_amounts[0] += 1;
+        self.0.data.parking_locations[0] = Some(ParkingLocation::NearTerminal);
     }
 
     fn end_match(mut self) -> AllianceInfo<1> {
@@ -482,22 +486,22 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
             teams: self.0.data.teams,
             penalty_points: self.0.data.penalty_points,
             auto_points: self.0.data.auto_points,
-            teleop_points: self
-                .0
-                .junctions
+            teleop_points: self.0.junctions
                 .iter()
                 .map(|(junction, count)| (count.get() * junction.points()) as u16)
-                .sum(),
+                .sum::<u16>()
+            + self.0.data.terminal_amounts.iter().sum::<u8>() as u16,
             endgame_points: {
-                let mut points = 0;
+                // parking
+                let mut points =
+                    if self.0.data.parking_locations[0] == Some(ParkingLocation::NearTerminal) { 2 } else { 0 };
                 // beacons
                 let beacons = self.0.data.beacon_placements;
                 let mut valid_beacon_count: u16 = 0;
                 for beacon in beacons {
                     if let Valid(junction) = beacon {
                         // this inserts garbage that you should never read. we already calculated scored cones. TODO hmmmmm insertion
-                        self.0
-                            .junctions
+                        self.0.junctions
                             .insert(junction, unsafe { NonZeroU8::new_unchecked(255) });
                         valid_beacon_count += 1;
                         points += 10;
@@ -512,8 +516,7 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
                     {
                         0
                     } else {
-                        circuit_pattern
-                            .iter()
+                        circuit_pattern.iter()
                             .all(|key| self.0.junctions.contains_key(key))
                             as u16
                             * 20
@@ -530,17 +533,25 @@ impl RemoteEndGame<RedRemoteJunction, 1, 0> for RedRemoteEndGame {
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct BlueRemoteAuto {
-    inner: RedRemoteAuto,
+    inner: RedRemoteAuto
 }
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct BlueRemoteTeleOp {
-    inner: RedRemoteTeleOp,
+    inner: RedRemoteTeleOp
 }
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct BlueRemoteEndGame {
-    inner: RedRemoteEndGame,
+    inner: RedRemoteEndGame
+}
+
+impl BlueRemoteEndGame {
+    // copied to force the best default for end_match
+    #[inline(always)]
+    fn end_match(self) -> AllianceInfo<1> {
+        <Self as RemoteEndGame<_, 0, 1>>::end_match(self)
+    }
 }
 
 macro_rules! blue_delegated_impl {
