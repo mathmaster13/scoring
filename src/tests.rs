@@ -1,5 +1,5 @@
 use crate::traditional::TraditionalAuto;
-use crate::traditional::TraditionalJunction::{V1, W2, W3, Y1};
+use crate::traditional::TraditionalJunction::{V1, V4, W2, W3, X2, Y1};
 use crate::{Alliance, Auto, EndGame, FtcTeamID, Match, SignalZone, TeleOp};
 use crate::locations::Terminal;
 use crate::remote::{RedRemoteAuto, RemoteAuto, RemoteCircuitPattern, RemoteEndGame, RemoteMatch};
@@ -64,4 +64,8 @@ fn circuit_test() {
     endgame.add_terminal_for(Alliance::RED, Terminal::Near);
     endgame.add_terminal_for(Alliance::RED, Terminal::Far);
     endgame.score_for(Alliance::RED, Y1);
+    endgame.score_for(Alliance::RED, X2);
+    endgame.score_for(Alliance::RED, W3);
+    endgame.score_for(Alliance::RED, V4);
+    dbg!(endgame.end_match());
 }

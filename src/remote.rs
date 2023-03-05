@@ -8,7 +8,6 @@ use crate::{AllianceInfo, InternalAllianceInfo};
 use crate::{Auto, BeaconError, ConeRemovalError, FieldCoordinate, Match, MaybeInvalid};
 use crate::{BeaconScoredOutsideEndgame, EndGame, TeleOp};
 use nohash::IntMap;
-use std::fmt::{Display, Formatter};
 use std::mem::transmute;
 use std::num::NonZeroU8;
 use std::ops::Index;

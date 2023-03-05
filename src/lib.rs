@@ -188,12 +188,6 @@ impl ConeStack {
     fn is_empty(&self) -> bool {
         self.top_idx.is_none()
     }
-    // seems like it's better to just have counters
-    // fn reds_blues(self) -> [u8; 2] {
-    //     // blue is true as a boolean
-    //     let blue_count = self.data[..self.top_idx as usize].iter().by_vals().filter(|b| *b).count() as u8;
-    //     [self.top_idx - blue_count, blue_count]
-    // }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]

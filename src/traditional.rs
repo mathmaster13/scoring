@@ -581,8 +581,8 @@ impl TraditionalEndGame {
                         } else { 0 }
                     })
                     .sum::<u16>();
-                if data.terminal_amounts[0] == 0
-                    && data.terminal_amounts[1] == 0
+                if data.terminal_amounts[0] != 0
+                    && data.terminal_amounts[1] != 0
                     && pathfinding::prelude::bfs(
                     &start,
                     // TODO remove collect
